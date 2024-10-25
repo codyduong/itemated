@@ -19,7 +19,7 @@ import PlayerHeadGui from "shared/client/gui/playerhead";
 import ScreenGui from "shared/client/gui/screen";
 import PlayerDataContext from "./gui/contexts/PlayerDataContext";
 
-const root = createRoot(new Instance("Folder"));
+let root = createRoot(new Instance("Folder"));
 root.render(
   <StrictMode>
     <PlayersContext>

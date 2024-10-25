@@ -3,7 +3,5 @@
  * @file This code is compiled and executed in the "game" place on the server
  */
 
-import { game_info_msg } from "game/modules/game";
-
-// TODO @codyduong remove
-game_info_msg();
+const l = script.Parent?.FindFirstChild("wfc") as Actor;
+l.SendMessage("Fire");
