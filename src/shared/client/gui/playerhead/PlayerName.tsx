@@ -2,6 +2,6 @@ import React from "@rbxts/react";
 
 type PlayerNameProps = {};
 
-export default function PlayerName(props: PlayerNameProps): JSX.Element {
+export default function PlayerName(_props: PlayerNameProps): JSX.Element {
   return <></>;
 }

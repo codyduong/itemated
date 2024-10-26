@@ -28,12 +28,14 @@
     "eslint-plugin-no-relative-import-paths": "^1.5.5",
     "eslint-plugin-prettier": "^5.2.1",
     "eslint-plugin-roblox-ts": "^0.0.36",
+    "eslint-plugin-unused-imports": "^4.1.4",
     "prettier": "^3.3.3",
     "roblox-ts": "^3.0.0",
-    "typescript": "^5.6.3"
+    "typescript": "5.5.4"
   },
   "dependencies": {
     "@rbxts/react": "^17.2.1",
     "@rbxts/react-roblox": "^17.2.1"
-  }
+  },
+  "packageManager": "yarn@4.5.1"
 }

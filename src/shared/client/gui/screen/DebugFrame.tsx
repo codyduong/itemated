@@ -3,7 +3,7 @@ import { usePlayerData } from "shared/client/gui/contexts/PlayerDataContext";
 
 interface DebugFrameProps {}
 
-export default function DebugFrame(props: DebugFrameProps): JSX.Element {
+export default function DebugFrame(_props: DebugFrameProps): JSX.Element {
   const data = usePlayerData();
 
   print(data);

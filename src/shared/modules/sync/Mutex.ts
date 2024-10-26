@@ -73,7 +73,7 @@ export default class Mutex<T> {
     try {
       callback(new LockResult(this.lockTable.poisoned === true ? new Poison() : new MutexGuard(this)));
       this.lockTable.lock = false;
-    } catch (e) {
+    } catch (_e) {
       this.lockTable.poisoned = true;
     }
     task.desynchronize();

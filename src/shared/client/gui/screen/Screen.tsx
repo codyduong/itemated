@@ -3,7 +3,7 @@ import DebugFrame from "./DebugFrame";
 
 interface ScreenProps {}
 
-export default function Screen(props: ScreenProps): JSX.Element {
+export default function Screen(_props: ScreenProps): JSX.Element {
   return (
     <>
       <DebugFrame />

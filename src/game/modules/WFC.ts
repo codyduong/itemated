@@ -10,7 +10,6 @@
  *   - https://marian42.de/article/wfc/
  */
 
-import Mutex from "shared/modules/sync/Mutex";
 import { DIRECTIONS, getVector } from "./Direction";
 import { allTiles, allTilesMap, isEnd, isPath, isStart } from "./tiles";
 
@@ -19,14 +18,13 @@ type Plane = Superposition[][];
 type Superposition = string[];
 type Coordinate = { x: number; y: number; z: number };
 
-function taxicabDistance(a: Coordinate, b: Coordinate): number {
-  return math.abs(a.x - b.x) + math.abs(a.y - b.y) + math.abs(a.z - b.z);
-}
-
 interface WaveFunctionCollapseProps {
   x: number;
   y: number;
   z: number;
+  seed?: number;
+  horizontalPadding: number;
+  pathLength: number;
 }
 
 export class WaveFunctionCollapse {
@@ -36,20 +34,31 @@ export class WaveFunctionCollapse {
   readonly z_size: number;
   readonly seed: number;
   readonly random: Random;
-  readonly mutex = new Mutex(undefined);
+  readonly horizontalPadding: number;
+  readonly verticalPadding = 0; // todo add boundary conditions in the y axis
+  private pathLength: number;
+  private path: Vector3[] = [];
+  // assuming a cube... don't do tiles that aren't cubes... -@codyduong
+  private readonly tileSize = 8;
 
   constructor(props: WaveFunctionCollapseProps) {
     this.x_size = props.x;
     this.y_size = props.y;
     this.z_size = props.z;
     // can range from -9_007_199_254_740_991 and 9_007_199_254_740_991,
-    // but we are constrained to int32 due to underlying c call
-    this.seed = math.random(-2_147_483_647, 2_147_483_647);
+    // but we are constrained to int32 due to math.random being called in C
+    this.seed = props.seed ?? math.random(-2_147_483_647, 2_147_483_647);
     this.random = new Random(this.seed);
     this.grid = this.setupGrid();
+    this.horizontalPadding = props.horizontalPadding;
+    this.pathLength = props.pathLength;
+    // print(this.grid);
   }
 
-  isValidCoordinate({ x, y, z }: Coordinate) {
+  /**
+   * Checks if a coordinate is valid
+   */
+  private isValidCoordinate({ x, y, z }: Coordinate): boolean {
     if (x >= this.x_size || x < 0) {
       return false;
     }
@@ -63,7 +72,10 @@ export class WaveFunctionCollapse {
     return true;
   }
 
-  getCoordinatesByTaxicabDistance(
+  /**
+   * TODO @codyduong, audit usage or deprecate
+   */
+  private getCoordinatesByTaxicabDistance(
     origin: Coordinate,
     n: number,
     predicate: (superposition: Superposition, coordinate?: Coordinate) => boolean,
@@ -93,18 +105,26 @@ export class WaveFunctionCollapse {
     return results;
   }
 
-  setupGrid(): Grid {
+  /**
+   * Initializes a grid of superpositions with padding to account for path not going over edges. If any other special
+   * rules are constrained ahead of collapse, then this is where you would put it.
+   */
+  private setupGrid(): Grid {
     let result = [];
     for (let x = 0; x < this.x_size; x++) {
       let ai = [];
       for (let y = 0; y < this.y_size; y++) {
         let aj = [];
         for (let z = 0; z < this.z_size; z++) {
-          // Don't allow path superpositions that go off the board
+          // Don't allow path positions that go off the edge
           let reducedTiles = allTiles.filter((tile) => {
+            const startEdge = this.horizontalPadding;
+            const endEdgeX = this.x_size - this.horizontalPadding - 1;
+            const endEdgeZ = this.z_size - this.horizontalPadding - 1;
+
             if (
-              (x === 0 && (tile.pathTo.includes("negativeX") || tile.pathFrom.includes("negativeX"))) ||
-              (x === this.x_size - 1 && (tile.pathTo.includes("positiveX") || tile.pathFrom.includes("positiveX")))
+              (x === startEdge && (tile.pathTo.includes("negativeX") || tile.pathFrom.includes("negativeX"))) ||
+              (x === endEdgeX && (tile.pathTo.includes("positiveX") || tile.pathFrom.includes("positiveX")))
             ) {
               return false;
             }
@@ -115,11 +135,16 @@ export class WaveFunctionCollapse {
               return false;
             }
             if (
-              (z === 0 && (tile.pathTo.includes("negativeZ") || tile.pathFrom.includes("negativeZ"))) ||
-              (z === this.z_size - 1 && (tile.pathTo.includes("positiveZ") || tile.pathFrom.includes("positiveZ")))
+              (z === startEdge && (tile.pathTo.includes("negativeZ") || tile.pathFrom.includes("negativeZ"))) ||
+              (z === endEdgeZ && (tile.pathTo.includes("positiveZ") || tile.pathFrom.includes("positiveZ")))
             ) {
               return false;
             }
+            // Don't allow path positions that are within the edge
+            if (isPath(tile.name) && (x < startEdge || x > endEdgeX || z < startEdge || z > endEdgeZ)) {
+              return false;
+            }
+
             return true;
           });
 
@@ -133,6 +158,9 @@ export class WaveFunctionCollapse {
     return result;
   }
 
+  /**
+   * Propogate the changes to a coordinate with either a collapsed position or a subset of the original superposition
+   */
   private propogate(to: Coordinate, superposition: Superposition): Grid {
     const stack: { to: Coordinate; superposition: Superposition }[] = [];
     const visited: Set<string> = new Set();
@@ -207,21 +235,19 @@ export class WaveFunctionCollapse {
           n_superposition = n_superposition.filter((n) => superadjacents.includes(n));
 
           if (n_superposition.size() === 0) {
-            print(
-              "state",
-              this.grid,
-              "from",
-              currentCoord,
-              "to",
-              toVisit,
-              "sup",
-              currentSuperposition,
-              "adj",
-              superadjacents,
-            );
+            // print(
+            //   "state",
+            //   this.grid,
+            //   "from",
+            //   currentCoord,
+            //   "to",
+            //   toVisit,
+            //   "sup",
+            //   currentSuperposition,
+            //   "adj",
+            //   superadjacents,
+            // );
             error(`contradiction in: ${direction}, ${this.seed}, ${this.x_size}, ${this.y_size}, ${this.z_size}`);
-            print(`contradiction in: ${direction}`); // TODO reenable this error
-            return;
           }
 
           stack.push({ to: toVisit, superposition: n_superposition });
@@ -232,8 +258,11 @@ export class WaveFunctionCollapse {
     return this.grid;
   }
 
-  /** serial version -- TODO need to swap to parallel */
-  lowestEntropy(): Coordinate | undefined {
+  /**
+   * Retrieves the coordinates of the superposition with the lowest amount of possible positions that isn't collapsed.
+   * In case of a tie chooses randomly between tied tiles.
+   */
+  private lowestEntropy(): Coordinate | undefined {
     let minCount = 2_147_483_647; // just some arbitrarily large value
     let coordinates: Coordinate[] = [];
 
@@ -259,7 +288,10 @@ export class WaveFunctionCollapse {
     return coordinates[this.random.NextInteger(0, coordinates.size() - 1)];
   }
 
-  lowestEntropyParallel(): Coordinate {
+  /**
+   * TODO implement. This is demo code. - @codyduong
+   */
+  private lowestEntropyParallel(): Coordinate {
     let coordinates: Coordinate[] = [];
     const workers: Actor[] = [];
 
@@ -310,14 +342,19 @@ export class WaveFunctionCollapse {
     return lowestEntropyCoords[this.random.NextInteger(0, coordinates.size() - 1)];
   }
 
-  setupStartAndEnd() {
+  /**
+   * Randomly choose a valid start position and propogate the changes.
+   *
+   * This used to also setup the end position but this often led to wfc being unable to solve. So it has been deprecated
+   * in favor of a path heuristic
+   */
+  private setupStartAndEnd() {
     const startPositions: Coordinate[] = [];
     // choose a random starting tile and a ending tile n distance away
-    // this.mutex.lock();
     this.grid.forEach((plane, x) =>
       plane.forEach((row, y) =>
         row.forEach((s, z) => {
-          if (s.find(isStart)) {
+          if (s.find(isStart) !== undefined) {
             startPositions.push({ x, y, z });
           }
         }),
@@ -329,11 +366,9 @@ export class WaveFunctionCollapse {
     const startSuperposition = this.grid[startPosition.x][startPosition.y][startPosition.z].filter(isStart);
     const selectedStart = startSuperposition[this.random.NextInteger(0, startSuperposition.size() - 1)];
     assert(selectedStart !== undefined, "Failed to select a start tile");
-    // task.synchronize();
     // parallel lua we have to wait for this result serially, and store it to ensure it is propogates correctly.
-    // this.mutex.release();
     let _ = this.propogate(startPosition, [selectedStart]);
-    print(startPosition, selectedStart, this.grid);
+    // print(startPosition, selectedStart, this.grid);
     // task.desynchronize();
     // const endPositions = this.getCoordinatesByTaxicabDistance(
     //   startPosition,
@@ -366,13 +401,13 @@ export class WaveFunctionCollapse {
     }
   }
 
-  getPathsToCheck(): Coordinate[] {
+  private getPathsToCheck(): Coordinate[] {
     const paths: Coordinate[] = [];
     this.grid.forEach((plane, x) =>
       plane.forEach((row, y) => {
         row.forEach((s, z) => {
           // ie. all collapsed paths
-          if (s.size() === 1 && s.find((t) => isPath(t))) {
+          if (s.size() === 1 && s.find((t) => isPath(t)) !== undefined) {
             paths.push({ x, y, z });
           }
         });
@@ -401,58 +436,50 @@ export class WaveFunctionCollapse {
     return positionsToCollapse;
   }
 
-  collapsePath(pathLength = 12): void {
-    print("attempt lock here");
-    // this.mutex.lock();
-
+  /**
+   * Chooses a random start path and then runs the wfc collapse on nearest path rather than by lowest entropy
+   */
+  private collapsePath(): void {
     let positionsToCollapse = this.getPathsToCheck();
-    // this.mutex.release();
 
-    // this must be done fully async or we can race condition out of the WFC.
-    // task.synchronize();
     let actualPathLength = 0;
     while (positionsToCollapse.size() > 0) {
       const collapsing = positionsToCollapse.remove(this.random.NextInteger(0, positionsToCollapse.size() - 1));
       assert(collapsing !== undefined, "how did this happen?");
-      // this.mutex.lock();
       let superposition = this.grid[collapsing.x][collapsing.y][collapsing.z];
-      // this.mutex.release();
 
-      // task.synchronize();
-
-      if (actualPathLength <= pathLength) {
+      if (actualPathLength <= this.pathLength) {
         superposition = superposition.filter((s) => !isEnd(s));
       } else {
         superposition = superposition.filter((s) => isEnd(s));
       }
-      // task.desynchronize();
 
       // we shouldn't actually collapse fully. apply a "light" wave function collapse,
       // reducing only to path, to gurantee a working path. -TODO @codyduong
-      print(superposition);
+      // print(superposition);
       const chose = superposition[this.random.NextInteger(0, superposition.size() - 1)];
-      print(chose);
+      // print(chose);
       assert(chose !== undefined, "uh oh");
-      // task.synchronize();
-      let _ = this.propogate(collapsing, [chose]); // please store the result to ensure parallel lua
+      let _ = this.propogate(collapsing, [chose]);
+      this.path.push(new Vector3());
       actualPathLength += 1;
-      // task.desynchronize();
       const toPathMaybe = [...allTilesMap[chose].pathFrom, ...allTilesMap[chose].pathTo];
       toPathMaybe.forEach((toMaybe) => {
         const [dx, dy, dz] = getVector(toMaybe);
         const dc = { x: collapsing.x + dx, y: collapsing.y + dy, z: collapsing.z + dz };
         // only append paths we still need to collapse
-        this.mutex.lock();
         if (this.grid[dc.x][dc.y][dc.z].size() > 1) {
           positionsToCollapse.push(dc);
         }
-        this.mutex.release();
       });
-      // if (positionsToCollapse.size() === 0) {
-      //   // there are scnearios where we have inadvertenly collapsed a tile early, which prevents this from path
-      //   positionsToCollapse = this.getPathsToCheck();
-      // }
-      // break;
+      if (positionsToCollapse.size() === 0) {
+        // there are scnearios where we have inadvertenly collapsed a tile early, which prevents path from completing
+        positionsToCollapse = this.getPathsToCheck();
+      }
+    }
+
+    if (actualPathLength <= this.pathLength) {
+      error("Didn't meet path length, likely hit dead end");
     }
 
     // then we can fully collapse our path after propogating and checking all adjacencies
@@ -469,53 +496,38 @@ export class WaveFunctionCollapse {
         }
       }
     }
-
-    // task.synchronize();
   }
 
-  isCollapsable(): boolean {
-    for (const plane of this.grid) {
-      for (const superposition of plane) {
-        if (superposition.size() > 1) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  }
-
+  /**
+   * Collapse the waveform to a state if possible, chooses by lowest entropy.
+   * @throws Errors if contradiction found
+   */
   collapse(): Grid {
-    print(this.seed);
-    // task.synchronize();
+    // print(this.seed);
     let _ = this.setupStartAndEnd();
     let __ = this.collapsePath();
-    // task.synchronize();
-    print(this.grid);
+    // print(this.grid);
     while (true) {
-      // task.synchronize();
       const c = this.lowestEntropy();
       // TODO need to switch to parallel computations
-      // task.desynchronize();
       // const c2 = this.lowestEntropyParallel();
-      // task.synchronize();
 
       // print("chose coord", c);
       if (!c) {
-        print("broken");
+        // print("broken");
         break;
       }
       const superposition = this.grid[c.x][c.y][c.z];
       // choose a random one
       const chose = superposition[this.random.NextInteger(0, superposition.size() - 1)];
       if (chose === undefined) {
-        print("broken2");
+        // print("broken2");
         break;
       }
-      print("chose", chose);
+      // print("chose", chose);
       this.propogate(c, [chose]);
     }
-    print(this.grid);
+    // print(this.grid);
     return this.grid;
   }
 
@@ -535,11 +547,12 @@ export class WaveFunctionCollapse {
             let position = this.grid[x][y][z][0];
             let tile = allTilesMap[position];
             let model = tile.model.Clone();
+            // 8 is tile size;
             const newPos = new Vector3(10 + x * 8, y * 8, 10 + z * 8);
             const newCFrame = new CFrame(newPos).mul(model.GetPivot().Rotation);
             model.PivotTo(newCFrame);
             model.Parent = folder;
-            if (os.difftime(os.clock(), start)) {
+            if (os.difftime(os.clock(), start) > 5) {
               start = os.clock();
               wait();
               task.defer(() => {});
@@ -551,6 +564,10 @@ export class WaveFunctionCollapse {
   }
 }
 
+/**
+ * PARALLEL CODE execution here...
+ * TODO: @codyduong, not used yet... just a demo
+ */
 const actor = script.GetActor();
 if (actor !== undefined) {
   actor.BindToMessageParallel(
