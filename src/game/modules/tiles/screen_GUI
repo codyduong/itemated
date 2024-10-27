@@ -1,0 +1,101 @@
+const player = game.GetService("Players").LocalPlayer;
+const playerGui = player.WaitForChild("PlayerGui") as PlayerGui;
+const userInputService = game.GetService("UserInputService");
+
+// Create a new ScreenGui
+const screenGui = new Instance("ScreenGui");
+screenGui.Parent = playerGui;
+
+// Get the "Noob" model from ReplicatedStorage
+const noobTemplate = game.GetService("ReplicatedStorage").WaitForChild("Noob") as Model;
+
+// Create a new TextButton
+const clickButton = new Instance("TextButton");
+clickButton.Size = new UDim2(0, 100, 0, 50);
+clickButton.Position = new UDim2(0.5, -50, 0, 670);
+clickButton.Text = "Place Noob";
+clickButton.Parent = screenGui;
+
+// Track placement mode
+let isPlacingNoob = false;
+let previewNoob: Model | undefined;
+
+// Function to anchor all parts in the model
+function anchorModel(model: Model) {
+    model.GetDescendants().forEach((descendant) => {
+        if (descendant.IsA("BasePart")) {
+            descendant.Anchored = true;
+        }
+    });
+}
+
+// Function to disable any animations or scripts
+function disableAnimations(model: Model) {
+    const animator = model.FindFirstChild("Animator") as Animator;
+    if (animator) {
+        animator.Destroy();
+    }
+    
+    const humanoid = model.FindFirstChild("Humanoid") as Humanoid;
+    if (humanoid) {
+        humanoid.PlatformStand = true;
+        // Optional: disable other humanoid states that might cause movement
+        humanoid.WalkSpeed = 0;
+        humanoid.JumpPower = 0;
+    }
+}
+
+// Function to set transparency for each part in the model
+function setModelTransparency(model: Model, transparency: number) {
+    model.GetDescendants().forEach((descendant) => {
+        if (descendant.IsA("BasePart")) {
+            descendant.Transparency = transparency;
+        }
+    });
+}
+
+// Function to update preview position
+const updatePreviewPosition = () => {
+    const mouseLocation = userInputService.GetMouseLocation();
+    const ray = game.Workspace.CurrentCamera?.ScreenPointToRay(mouseLocation.X, mouseLocation.Y);
+    
+    if (ray && previewNoob) {
+        const raycastResult = game.Workspace.Raycast(ray.Origin, ray.Direction.mul(1000));
+        
+        if (raycastResult) {
+            previewNoob.PivotTo(new CFrame(raycastResult.Position));
+        }
+    }
+};
+
+// Connect button to enter placement mode
+clickButton.MouseButton1Click.Connect(() => {
+    isPlacingNoob = true;
+    
+    // Clone the "Noob" model as a preview
+    previewNoob = noobTemplate.Clone();
+    previewNoob.Parent = game.Workspace;
+    setModelTransparency(previewNoob, 0.5); // Make it semi-transparent as a visual cue
+    anchorModel(previewNoob); // Anchor the preview
+    disableAnimations(previewNoob); // Disable animations for preview
+});
+
+// Update preview position as mouse moves
+userInputService.InputChanged.Connect((input) => {
+    if (isPlacingNoob && input.UserInputType === Enum.UserInputType.MouseMovement) {
+        updatePreviewPosition();
+    }
+});
+
+// Place the Noob model on mouse click
+userInputService.InputBegan.Connect((input) => {
+    if (isPlacingNoob && input.UserInputType === Enum.UserInputType.MouseButton1) {
+        if (previewNoob) {
+            setModelTransparency(previewNoob, 0); // Set to fully visible
+            anchorModel(previewNoob); // Make sure it's anchored
+            disableAnimations(previewNoob); // Disable any animations
+            previewNoob = undefined; // Clear preview
+        }
+        isPlacingNoob = false; // Exit placement mode
+    }
+});
